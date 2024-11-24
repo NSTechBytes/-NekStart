@@ -1,12 +1,15 @@
 param (
-    [string[]]$skinNames 
+    [string]$skinNames  # Comma-separated list of skin names to be processed
 )
 
-# Check if at least one skin name is provided
-if (-not $skinNames -or $skinNames.Count -eq 0) {
-    Write-Host "Error: At least one skin name must be provided. Use -skinNames parameter to specify them."
+# Check if the skin names are provided
+if (-not $skinNames) {
+    Write-Host "Error: Skin names must be provided. Use -skinNames parameter to specify them."
     exit
 }
+
+# Split the skin names into an array
+$skinNamesArray = $skinNames.Split(',')
 
 # Function to get Rainmeter skin folder path
 function Get-RainmeterSkinsFolder {
@@ -14,9 +17,17 @@ function Get-RainmeterSkinsFolder {
     $defaultProgramFilesX86Path = "$env:ProgramFiles(x86)\Rainmeter\Skins"
     $defaultDocumentsPath = "$env:UserProfile\Documents\Rainmeter\Skins"
 
-    if (Test-Path $defaultProgramFilesPath) { return $defaultProgramFilesPath }
-    if (Test-Path $defaultProgramFilesX86Path) { return $defaultProgramFilesX86Path }
-    if (Test-Path $defaultDocumentsPath) { return $defaultDocumentsPath }
+    if (Test-Path $defaultProgramFilesPath) {
+        return $defaultProgramFilesPath
+    }
+
+    if (Test-Path $defaultProgramFilesX86Path) {
+        return $defaultProgramFilesX86Path
+    }
+
+    if (Test-Path $defaultDocumentsPath) {
+        return $defaultDocumentsPath
+    }
 
     $rainmeterConfigPath = "$env:AppData\Rainmeter\Rainmeter.ini"
     if (Test-Path $rainmeterConfigPath) {
@@ -30,10 +41,11 @@ function Get-RainmeterSkinsFolder {
             }
         }
     }
+
     return "Rainmeter Skins folder not found!"
 }
 
-# Function to stop Rainmeter
+# Function to stop Rainmeter if it's running
 function Stop-Rainmeter {
     $rainmeterProcess = Get-Process -Name "Rainmeter" -ErrorAction SilentlyContinue
     if ($rainmeterProcess) {
@@ -45,67 +57,77 @@ function Stop-Rainmeter {
     }
 }
 
-# Stop Rainmeter
-Stop-Rainmeter
-
-# Common variables
-$destinationFolder = "C:\nstechbytes"
-$skinsDirectory = Get-RainmeterSkinsFolder
-$is64Bit = [Environment]::Is64BitOperatingSystem
-$rainmeterPluginsPath = Join-Path -Path $env:UserProfile -ChildPath "AppData\Roaming\Rainmeter\Plugins"
-
-# Process each skin
-foreach ($skinName in $skinNames) {
+# Process each skin in the list
+foreach ($skinName in $skinNamesArray) {
     Write-Host "Processing skin: $skinName"
-    
 
-    # Download Version.nek
+    # Stop Rainmeter before updating skins
+    Stop-Rainmeter
+
+    # GitHub raw URL for the Version.nek file for the given skin name
     $versionUrl = "https://raw.githubusercontent.com/NSTechBytes/$skinName/main/%40Resources/Version.nek"
-    $tempVersionFile = "$env:TEMP\$skinName-Version.nek"
+
+    # Destination folder to save the downloaded skin and extraction folder
+    $destinationFolder = "C:\nstechbytes"
+    $extractionFolder = "$destinationFolder\$skinName"
+
+    # Download the Version.nek file
+    $tempVersionFile = "$env:TEMP\Version.nek"
     Invoke-WebRequest -Uri $versionUrl -OutFile $tempVersionFile
 
-    # Extract version
+    # Read the Version.nek file and extract the version number
     $versionData = Get-Content $tempVersionFile
     $versionLine = $versionData | Where-Object { $_ -match "Version=" }
     $version = $versionLine -replace "Version=", ""
 
-    # Download skin
+    # GitHub release URL for the skin download based on the extracted version
     $url = "https://github.com/NSTechBytes/$skinName/releases/download/v$version/${skinName}_$version.rmskin"
-    $destination = "$destinationFolder\${skinName}_$version.rmskin"
 
+    # Check if the destination folder exists, if not, create it
     if (-Not (Test-Path -Path $destinationFolder)) {
         New-Item -ItemType Directory -Path $destinationFolder
     }
 
+    # Destination file path
+    $destination = "$destinationFolder\${skinName}_$version.rmskin"
+
+    # Download the skin using the retrieved version
     Invoke-WebRequest -Uri $url -OutFile $destination
     Write-Host "Downloaded $skinName version $version to $destination"
 
-    # Extract .rmskin file
-    $extractionFolder = "$destinationFolder\$skinName"
+    # Create extraction folder if it doesn't exist
     if (-Not (Test-Path -Path $extractionFolder)) {
         New-Item -ItemType Directory -Path $extractionFolder
     }
 
+    # Extract the .rmskin file (as it is essentially a ZIP archive)
     Add-Type -AssemblyName 'System.IO.Compression.FileSystem'
     [System.IO.Compression.ZipFile]::ExtractToDirectory($destination, $extractionFolder)
     Write-Host "Extracted $skinName to $extractionFolder"
 
-    # Clean up temporary version file
+    # Clean up the temporary version file
     Remove-Item $tempVersionFile
 
-    # Remove existing skin folder
+    # Find the skin path using the function
+    $skinsDirectory = Get-RainmeterSkinsFolder
+
+    # Remove the existing skin folder if it exists
     if (Test-Path -Path $skinsDirectory) {
         $skinToRemove = Join-Path -Path $skinsDirectory -ChildPath $skinName
+
         if (Test-Path -Path $skinToRemove) {
             Remove-Item -Path $skinToRemove -Recurse -Force
             Write-Host "Removed the existing skin folder: $skinToRemove"
         } else {
-            Write-Host "No existing skin folder found for: $skinName"
+            Write-Host "No existing skin folder found to remove: $skinToRemove"
         }
+    } else {
+        Write-Host "No Rainmeter skins folder found."
     }
 
-    # Copy new skin folder
+    # Copy the extracted skin folder to the Rainmeter skins path
     $extractedSkinFolder = Join-Path -Path $extractionFolder -ChildPath "Skins\$skinName"
+
     if (Test-Path -Path $extractedSkinFolder) {
         $destinationSkinPath = Join-Path -Path $skinsDirectory -ChildPath $skinName
         Copy-Item -Path $extractedSkinFolder -Destination $destinationSkinPath -Recurse -Force
@@ -114,12 +136,20 @@ foreach ($skinName in $skinNames) {
         Write-Host "Extracted skin folder does not exist: $extractedSkinFolder"
     }
 
-    # Copy plugins
-    $pluginsFolder = Join-Path -Path $extractionFolder -ChildPath "Plugins\64bit"
-    if (-Not $is64Bit) {
+    # Determine the OS architecture (32-bit or 64-bit)
+    $is64Bit = [Environment]::Is64BitOperatingSystem
+
+    # Set the appropriate plugins folder based on OS architecture
+    if ($is64Bit) {
+        $pluginsFolder = Join-Path -Path $extractionFolder -ChildPath "Plugins\64bit"
+    } else {
         $pluginsFolder = Join-Path -Path $extractionFolder -ChildPath "Plugins\32bit"
     }
 
+    # Define the Rainmeter Plugins path using environment variable for user profile
+    $rainmeterPluginsPath = Join-Path -Path $env:UserProfile -ChildPath "AppData\Roaming\Rainmeter\Plugins"
+
+    # Check if the plugins folder exists and copy DLL files
     if (Test-Path -Path $pluginsFolder) {
         if (Test-Path -Path $rainmeterPluginsPath) {
             Get-ChildItem -Path $pluginsFolder -Filter "*.dll" | ForEach-Object {
@@ -132,27 +162,28 @@ foreach ($skinName in $skinNames) {
     } else {
         Write-Host "No DLL files found in: $pluginsFolder"
     }
+
+    # Start Rainmeter application
+    $rainmeterPath = Join-Path -Path $env:ProgramFiles -ChildPath "Rainmeter\Rainmeter.exe"
+    if (-Not (Test-Path -Path $rainmeterPath)) {
+        $rainmeterPath = Join-Path -Path $env:ProgramFiles(x86) -ChildPath "Rainmeter\Rainmeter.exe"
+    }
+
+    if (Test-Path -Path $rainmeterPath) {
+        Start-Process -FilePath $rainmeterPath
+    } else {
+        Write-Host "Rainmeter executable not found!"
+    }
+
+    # Remove the nstechbytes folder
+    if (Test-Path -Path $destinationFolder) {
+        Remove-Item -Path $destinationFolder -Recurse -Force
+        Write-Host "Removed the nstechbytes folder: $destinationFolder"
+    } else {
+        Write-Host "nstechbytes folder not found!"
+    }
+
+    Write-Host "$skinName update process completed!"
 }
 
-# Start Rainmeter
-$rainmeterPath = Join-Path -Path $env:ProgramFiles -ChildPath "Rainmeter\Rainmeter.exe"
-if (-Not (Test-Path -Path $rainmeterPath)) {
-    $rainmeterPath = Join-Path -Path $env:ProgramFiles(x86) -ChildPath "Rainmeter\Rainmeter.exe"
-}
-
-if (Test-Path -Path $rainmeterPath) {
-    Start-Process -FilePath $rainmeterPath
-    Write-Host "Rainmeter started."
-} else {
-    Write-Host "Rainmeter executable not found!"
-}
-
-# Remove the nstechbytes folder
-if (Test-Path -Path $destinationFolder) {
-    Remove-Item -Path $destinationFolder -Recurse -Force
-    Write-Host "Removed the nstechbytes folder: $destinationFolder"
-} else {
-    Write-Host "nstechbytes folder not found!"
-}
-
-Write-Host "Update process completed!"
+Write-Host "All skins update process completed!"
