@@ -57,6 +57,7 @@ $rainmeterPluginsPath = Join-Path -Path $env:UserProfile -ChildPath "AppData\Roa
 # Process each skin
 foreach ($skinName in $skinNames) {
     Write-Host "Processing skin: $skinName"
+    Write-Host "Processing skin: $skinNames"
 
     # Download Version.nek
     $versionUrl = "https://raw.githubusercontent.com/NSTechBytes/$skinName/main/%40Resources/Version.nek"
