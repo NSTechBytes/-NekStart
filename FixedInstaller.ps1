@@ -1,5 +1,5 @@
 param (
-    [string[]]$skinNames = @("ModernSearchBar")
+    [string[]]$skinNames = @("#NekStart")
 )
 
 #=================================================================================================================================#
@@ -189,15 +189,15 @@ foreach ($skinName in $skinNames) {
     $version = $versionLine -replace "Version=", ""
 
     # GitHub release URL for the skin download based on the extracted version
-    $url = "https://github.com/NSTechBytes/$skinName/releases/download/v$version/${skinName}_$version.rmskin"
+    $url = "https://github.com/NSTechBytes/$skinName/releases/download/v$version/${skinName}_v$version.rmskin"
 
     # Check if the destination folder exists, if not, create it
     if (-Not (Test-Path -Path $destinationFolder)) {
         New-Item -ItemType Directory -Path $destinationFolder
     }
-
+   
     # Destination file path
-    $destination = "$destinationFolder\${skinName}_$version.rmskin"
+    $destination = "$destinationFolder\${skinName}_v$version.rmskin"
 
     # Download the skin using the retrieved version
     Invoke-WebRequest -Uri $url -OutFile $destination
